@@ -48,7 +48,7 @@ class Trainer:
         self.start_epoch = 0
         self.check_best_cooldown = 0
         self.device = device
-        self.project_name = 'mask2former'
+        self.project_name = 'maskformer'
  
         self.get_augmentations()
         self.get_loaders()
@@ -402,7 +402,7 @@ def collate_fn(batch):
  
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model', type=str, default='Mask2Former', help='Which model you want to train?')
+    parser.add_argument('--model', type=str, default='MaskFormer', help='Which model you want to train?')
     parser.add_argument('--lr', type=float, default=1e-3, help='Learning rate')
     parser.add_argument('--adam-eps', nargs='+', type=float, default=1e-3, help='Adam epsilon')
     parser.add_argument('--weight-decay', type=float, default=1e-3, help='Weight decay that is used for AdamW')
@@ -429,7 +429,7 @@ if __name__ == '__main__':
     id2label = { 0: 'background', 1: 'fire' }
     label2id = { 'background': 0, 'fire': 1 }
  
-    model_name = "facebook/mask2former-swin-base-ade-semantic" #"facebook/maskformer-swin-base-ade"
+    model_name = "facebook/maskformer-swin-base-ade" #"facebook/mask2former-swin-base-ade-semantic"
     processor = AutoImageProcessor.from_pretrained(
         model_name,
         do_resize=False,
