@@ -55,7 +55,7 @@ class Trainer:
  
         self.optimizer = torch.optim.AdamW(self.model.parameters(), weight_decay=self.args.weight_decay, eps=self.args.adam_eps, lr=self.args.lr)
         self.scheduler = torch.optim.lr_scheduler.OneCycleLR(self.optimizer, max_lr=self.args.lr, steps_per_epoch=len(self.train_loader), epochs=self.args.epochs)
-        self.early_stopping = YOLOEarlyStopping(patience=30)
+        self.early_stopping = YOLOEarlyStopping(patience=40)
  
         self.metrics = [
             F.dice,
@@ -429,7 +429,7 @@ if __name__ == '__main__':
     id2label = { 0: 'background', 1: 'fire' }
     label2id = { 'background': 0, 'fire': 1 }
  
-    model_name = "facebook/maskformer-swin-base-ade" #"facebook/mask2former-swin-base-ade-semantic"
+    model_name = "facebook/maskformer-swin-tiny-ade" #"facebook/mask2former-swin-tiny-cityscapes-semantic"
     processor = AutoImageProcessor.from_pretrained(
         model_name,
         do_resize=False,
@@ -445,8 +445,9 @@ if __name__ == '__main__':
         ignore_mismatched_sizes=True,
     )
  
+    net.config.num_labels = args.classes
     processor.num_text = 0 #net.config.num_queries - net.config.text_encoder_n_ctx
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
  
  
     if args.use_ddp:
