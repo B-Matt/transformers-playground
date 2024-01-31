@@ -260,7 +260,6 @@ class Trainer:
  
         global_step = 0
         last_best_score = float('inf')
-        masks_pred = []
  
         torch.cuda.empty_cache()
         for epoch in range(self.start_epoch, self.args.epochs):
@@ -269,11 +268,6 @@ class Trainer:
                 for batch in progress_bar:
                     loss = 0.0
                     outputs = None
-                    self.optimizer.zero_grad(set_to_none=True)
- 
-                    # Get Batch Of Images
-                    batch_image = batch['original_images'][0].to(device, non_blocking=True)
-                    batch_mask = batch['original_segmentation_maps'][0].to(device, non_blocking=True)
  
                     # Predict
                     with torch.cuda.amp.autocast(enabled=self.args.use_amp):
@@ -286,9 +280,10 @@ class Trainer:
                         self.loss_meter.add(loss.item())
  
                     # Scale Gradients
+                    self.optimizer.zero_grad(set_to_none=True)
                     grad_scaler.scale(loss).backward()
-                    grad_scaler.unscale_(self.optimizer)
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), 255.0)
+                    #grad_scaler.unscale_(self.optimizer)
+                    #torch.nn.utils.clip_grad_norm_(self.model.parameters(), 255.0)
  
                     grad_scaler.step(self.optimizer)
                     grad_scaler.update()
@@ -302,17 +297,6 @@ class Trainer:
                     if eval_step > 0 and global_step % eval_step == 0:
                         val_loss = validate(self.model, self.val_loader, self.device, self.gpu_id, epoch, wandb_log, self.processor, self.args)
  
-                        if self.gpu_id == 0:
-                            target_sizes = [(args.patch_size, args.patch_size)] * outputs.class_queries_logits.shape[0]
-                            masks_pred = self.processor.post_process_semantic_segmentation(outputs, target_sizes=target_sizes)[0]
- 
-                            jaccard_index = F.classification.binary_jaccard_index(masks_pred, batch_mask.long(), threshold=0.5, ignore_index=0).cpu().detach().numpy()
-                            self.metrics_meters['jaccard_index'].add(jaccard_index)
- 
-                            dice = F.dice(masks_pred, batch_mask.long(), threshold=0.5, ignore_index=0).cpu().detach().numpy()
-                            self.metrics_meters['dice'].add(dice)
-                            self.metrics_logs = {k: v.mean for k, v in self.metrics_meters.items()}
- 
                         if self.args.use_ddp:
                             torch.distributed.barrier()
  
@@ -320,19 +304,6 @@ class Trainer:
                         if epoch >= self.check_best_cooldown and val_loss < last_best_score:
                             self.save_checkpoint(epoch, True)
                             last_best_score = val_loss
- 
-                        # Update WANDB with Images
-                        if self.gpu_id == 0:
-                            try:
-                                wandb_log.log({
-                                    'Images [training]': {
-                                        'Image': wandb.Image(batch_image.cpu()),
-                                        'Ground Truth': wandb.Image(batch_mask.squeeze(0).detach().cpu().numpy()),
-                                        'Prediction': wandb.Image(masks_pred.detach().cpu().float().numpy()),
-                                    },
-                                }, step=epoch)
-                            except Exception as e:
-                                print('Wandb error: ', e)
  
                 # Update WANDB
                 if self.gpu_id == 0:
@@ -343,8 +314,6 @@ class Trainer:
                         'Learning Rate': self.optimizer.param_groups[0]['lr'],
                         'Epoch': epoch,
                         'Loss [training]': self.loss_meter.mean,
-                        'IoU Score [training]': self.metrics_logs['jaccard_index'],
-                        'Dice Score [training]': self.metrics_logs['dice'],
                     }, step=epoch)
  
                     # Saving last model
@@ -447,7 +416,7 @@ if __name__ == '__main__':
  
     net.config.num_labels = args.classes
     processor.num_text = 0 #net.config.num_queries - net.config.text_encoder_n_ctx
-    device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
  
  
     if args.use_ddp:

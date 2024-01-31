@@ -2,8 +2,8 @@ import datetime
 import subprocess
  
 training_setups = [
-    r'./.venv/bin/python main.py --epochs=500 --batch-size=42 --patch-size=256 --weight-decay=1e-3 --lr=1e-4 --use-amp --save-checkpoints',
-    r'./.venv/bin/python main.py --epochs=500 --batch-size=8 --patch-size=640 --weight-decay=1e-3 --lr=1e-4 --save-checkpoints',
+    r'./.venv/bin/python main.py --epochs=10 --batch-size=42 --patch-size=256 --weight-decay=1e-3 --lr=1e-2',
+    #r'./.venv/bin/python main.py --epochs=500 --batch-size=8 --patch-size=640 --weight-decay=1e-3 --lr=1e-4 --save-checkpoints',
     #r'./.venv/bin/python main.py --epochs=500 --batch-size=3 --patch-size=800 --weight-decay=1e-3 --lr=1e-4 --save-checkpoints',
 ]
  
