@@ -23,11 +23,6 @@ class DatasetType(enum.Enum):
     VALIDATION = 'validation_dataset'
     TEST = 'test_dataset'
  
-class DatasetCacheType(enum.Enum):
-    NONE = 0,
-    RAM = 1,
-    DISK = 2,
- 
 class Dataset(Dataset):
     def __init__(self,
         data_dir: string,
@@ -114,7 +109,7 @@ class Dataset(Dataset):
     def __len__(self):
         return len(self.img_tupels)
  
-    def __getitem__(self, index: int):
+    """def __getitem__(self, index: int):
         img, mask = self.load_sample(index)
  
         if self.transform is not None:
@@ -125,7 +120,25 @@ class Dataset(Dataset):
         temp_mask = temp_mask / 255.0
         #temp_mask = temp_mask.unsqueeze(0)
  
-        #inputs = self.processor(images=temp_img, segmentation_maps=temp_mask, task_inputs=["semantic"], return_tensors="pt")
-        #inputs = { k: v.squeeze() if isinstance(v, torch.Tensor) else v[0] for k,v in inputs.items() }
+        inputs = self.processor(images=temp_img, segmentation_maps=temp_mask, task_inputs=["semantic"], return_tensors="pt")
+        inputs = { k: v.squeeze() if isinstance(v, torch.Tensor) else v[0] for k,v in inputs.items() }
         #inputs['mask_labels'] = inputs['mask_labels'] / 255.0
-        return temp_img, temp_mask
+        return temp_img, temp_mask"""
+
+
+    def __getitem__(self, index):
+        img, mask = self.load_sample(index)
+ 
+        if self.transform is not None:
+            augmentation = self.transform(image=img, mask=mask)
+            temp_img = augmentation['image']
+            temp_mask = augmentation['mask']
+
+        temp_mask = temp_mask / 255.0
+
+        # Else use process the image with the segmentation maps
+        inputs = self.processor(images=[temp_img], segmentation_maps=[temp_mask], task_inputs=["semantic"], return_tensors="pt")
+        inputs = { k:v.squeeze() if isinstance(v, torch.Tensor) else v[0] for k,v in inputs.items() }
+
+        # Return the inputs
+        return inputs

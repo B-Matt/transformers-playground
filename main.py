@@ -22,11 +22,10 @@ from pathlib import Path
 from pipeline.validation import validate
 from albumentations.pytorch import ToTensorV2
 from torch.utils.data import DataLoader
-from utils.plots import plot_img_and_mask
  
 from transformers import AutoImageProcessor, AutoModelForUniversalSegmentation
  
-from utils.dataset import Dataset, DatasetCacheType, DatasetType
+from utils.dataset import Dataset, DatasetType
 from utils.early_stopping import YOLOEarlyStopping
  
 # Logging
@@ -120,8 +119,6 @@ class Trainer:
                 # Geometric transforms
                 A.HorizontalFlip(p=0.5),
                 A.Rotate(limit=5, p=0.5),
-                #A.CoarseDropout(max_holes=6, max_height=12, max_width=12, min_holes=1, p=0.5),
-                #A.ShiftScaleRotate(shift_limit=0.09, rotate_limit=0, p=0.2),
                 A.OneOf(
                     [
                         A.GridDistortion(distort_limit=0.1, p=0.5),
@@ -129,7 +126,6 @@ class Trainer:
                     ],
                     p=0.0
                 ),
-                #A.Perspective(scale=(0.02, 0.07), p=0.5),
  
                 # Color transforms
                 A.ColorJitter(
@@ -158,6 +154,24 @@ class Trainer:
             ],
         )
  
+    def collate_fn(self, examples):
+        # Get the pixel values, pixel mask, mask labels, and class labels
+        pixel_values = torch.stack([example["pixel_values"] for example in examples])
+        pixel_mask = torch.stack([example["pixel_mask"] for example in examples])
+        mask_labels = [example["mask_labels"] for example in examples]
+        class_labels = [example["class_labels"] for example in examples]
+
+        #print(mask_labels, class_labels)
+        #print(pixel_values.shape, pixel_mask.shape, len(mask_labels), len(class_labels))
+
+        # Return a dictionary of all the collated features
+        return {
+            "pixel_values": pixel_values,
+            "pixel_mask": pixel_mask,
+            "mask_labels": mask_labels,
+            "class_labels": class_labels
+        }
+
     def get_loaders(self):
         self.train_dataset = Dataset(
             data_dir=r'dataset',
@@ -186,7 +200,7 @@ class Trainer:
             drop_last=True if not self.args.use_ddp else False,
             sampler=DistributedSampler(self.train_dataset) if self.args.use_ddp else None,
             persistent_workers=self.args.workers > 0,
-            collate_fn=collate_fn
+            collate_fn=lambda b: self.collate_fn(b)
         )
  
         self.val_loader = DataLoader(
@@ -198,7 +212,7 @@ class Trainer:
             drop_last=False,
             sampler=DistributedSampler(self.val_dataset) if self.args.use_ddp else None,
             persistent_workers=self.args.workers > 0,
-            collate_fn=collate_fn
+            collate_fn=lambda b: self.collate_fn(b)
         )
  
     def save_checkpoint(self, epoch: int, is_best: bool = False):
@@ -353,22 +367,6 @@ def ddp_trainer_main(rank: int, world_size: int, args: Namespace, net: any, proc
  
     destroy_process_group()
  
-def collate_fn(batch):
-    inputs = list(zip(*batch))
-    images = inputs[0]
-    segmentation_maps = inputs[1]
- 
-    batch = processor(
-        images,
-        segmentation_maps=segmentation_maps,
-        task_inputs=["semantic"],
-        return_tensors="pt",
-    )
- 
-    batch["original_images"] = inputs[0]
-    batch["original_segmentation_maps"] = inputs[1]
-    return batch
- 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', type=str, default='MaskFormer', help='Which model you want to train?')
@@ -395,8 +393,8 @@ if __name__ == '__main__':
     os.environ['TOKENIZERS_PARALLELISM'] = 'false'
     os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'garbage_collection_threshold:0.6,max_split_size_mb:512'
  
-    id2label = { 0: 'background', 1: 'fire' }
-    label2id = { 'background': 0, 'fire': 1 }
+    id2label = { 1: 'fire' }
+    label2id = { 'fire': 1 }
  
     model_name = "facebook/maskformer-swin-tiny-ade" #"facebook/mask2former-swin-tiny-cityscapes-semantic"
     processor = AutoImageProcessor.from_pretrained(
@@ -414,8 +412,6 @@ if __name__ == '__main__':
         ignore_mismatched_sizes=True,
     )
  
-    net.config.num_labels = args.classes
-    processor.num_text = 0 #net.config.num_queries - net.config.text_encoder_n_ctx
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
  
  
