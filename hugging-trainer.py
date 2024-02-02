@@ -120,7 +120,7 @@ def compute_metrics(eval_pred):
 
 def train(model, train_dataset, val_dataset, args, processor):    
     train_args = TrainingArguments(
-        output_dir=f"./checkpoints/{args.name.lower()}/{run_name}",
+        output_dir=f"./checkpoints/{args.name.lower()}/{args.patch_size}x{args.patch_size}-{args.batch_size}",
         overwrite_output_dir = True,
         load_best_model_at_end=True,
         
@@ -169,7 +169,7 @@ def train(model, train_dataset, val_dataset, args, processor):
 
     trainer.train()
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--name', type=str, default='Mask2Former', help='Training name')
@@ -180,14 +180,14 @@ if __name__ == '__main__':
     parser.add_argument('--epochs', type=int, default=1, help='Epochs')
     parser.add_argument('--batch-size', type=int, default=8, help='Batch size')
     parser.add_argument('--patch-size', type=int, default=800, help='Patch size')
-    parser.add_argument('--workers', type=int, default=10, help='Dataloader workers')
+    parser.add_argument('--workers', type=int, default=6, help='Dataloader workers')
     parser.add_argument('--use-ddp', action='store_true', help='Use Pytorch Distributed Data Parallel?')
     args = parser.parse_args()
 
+    os.environ["WANDB_PROJECT"] = args.name.lower()
     os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
-    os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'garbage_collection_threshold:0.6,max_split_size_mb:512'
-    os.environ["TORCH_LOGS"] = "+dynamo"
-    os.environ["TORCHDYNAMO_VERBOSE"] = "1"    
+    os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
+    os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'garbage_collection_threshold:0.6,max_split_size_mb:512'   
 
     id2label = { 1: 'fire' }
     label2id = { 'fire': 1 }
@@ -212,8 +212,8 @@ if __name__ == '__main__':
     # Prepare data
     train_dataset, val_dataset = prepare_data(processor)
 
-    # Wandb
-    if int(os.environ.get("LOCAL_RANK", -1)) == 1:
+    # Logs
+    if int(os.environ.get("LOCAL_RANK", -1)) == 0:
         log.info(
             f"""[TRAINING]:
                 Model:           {args.name}
@@ -227,29 +227,9 @@ if __name__ == '__main__':
             """
         )
 
-        wandb_log = wandb.init(project=args.name.lower(), entity="firebot031")
-        wandb_log.config.update(
-            dict(
-                epochs=args.epochs,
-                batch_size=args.batch_size,
-                learning_rate=args.lr,
-                patch_size=args.patch_size,
-                weight_decay=args.weight_decay,
-            )
-        )
-
-        run_name = (
-            wandb.run.name
-            if wandb.run.name is not None
-            else f"{args.model}-{args.encoder}-{args.batch_size}-{args.patch_size}"
-        )
-
-        save_path = pathlib.Path(f"checkpoints/{args.name.lower()}", run_name)
+        save_path = pathlib.Path(f"checkpoints/{args.name.lower()}", f"{args.patch_size}x{args.patch_size}-{args.batch_size}")
         if not os.path.isdir(save_path):
             os.makedirs(save_path)
 
     # Train
     train(model, train_dataset, val_dataset, args, processor)
-
-    if int(os.environ.get("LOCAL_RANK", -1)) == 1:
-        wandb.finish()
