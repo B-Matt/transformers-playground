@@ -15,8 +15,7 @@ from albumentations.pytorch import ToTensorV2
 from transformers import TrainingArguments, Trainer
 from sklearn.metrics import accuracy_score, jaccard_score
 
-from transformers.integrations import WandbCallback, EarlyStoppingCallback
-from transformers import AutoImageProcessor, Mask2FormerForUniversalSegmentation
+from transformers import AutoImageProcessor, AutoModelForUniversalSegmentation, EarlyStoppingCallback
 
 # Logging
 from utils.logging import logging
@@ -26,33 +25,7 @@ log.setLevel(logging.INFO)
 
 metric = evaluate.load("mean_iou")
 
-# Callbacks
-class WandbPredictionProgressCallback(WandbCallback):
-    def __init__(self, processor, val_loader):
-        super().__init__()
-
-        self.processor = processor
-        self.val_loader = val_loader
-
-    def on_evaluate(self, args, state, control, **kwargs):
-        # Get the predictions
-        model = kwargs['model']
-
-        model.eval()
-        batch = next(iter(self.val_loader))
-        with torch.no_grad():
-            outputs = model(
-                pixel_values=batch["pixel_values"].cuda(),
-                mask_labels=[labels.cuda() for labels in batch["mask_labels"]],
-                class_labels=[labels.cuda() for labels in batch["class_labels"]],
-            )
-
-            target_sizes = [(256, 256)] * outputs.class_queries_logits.shape[0]
-            segmentation = processor.post_process_semantic_segmentation(outputs, target_sizes=target_sizes)
-            for segment in segmentation:
-                print(segment.shape, torch.unique(segment))
-        model.train()
-
+run_name = ""
 
 # Functions
 def prepare_data(processor):
@@ -145,40 +118,7 @@ def compute_metrics(eval_pred):
         'jaccard': jaccard_score(predictions, labels, average="weighted"),
     }
 
-def train(model, train_dataset, val_dataset, args, processor):
-    log.info(
-        f"""[TRAINING]:
-        Model:           {args.name}
-        Resolution:      {args.patch_size}x{args.patch_size}
-        Epochs:          {args.epochs}
-        Batch size:      {args.batch_size}
-        Patch size:      {args.patch_size}
-        Learning rate:   {args.lr}
-        Training size:   {int(len(train_dataset))}
-        Validation size: {int(len(val_dataset))}
-    """
-    )
-
-    wandb_log = wandb.init(project=args.name.lower(), entity="firebot031")
-    wandb_log.config.update(
-        dict(
-            epochs=args.epochs,
-            batch_size=args.batch_size,
-            learning_rate=args.lr,
-            patch_size=args.patch_size,
-            weight_decay=args.weight_decay,
-        )
-    )
-
-    run_name = (
-        wandb.run.name
-        if wandb.run.name is not None
-        else f"{args.model}-{args.encoder}-{args.batch_size}-{args.patch_size}"
-    )
-    save_path = pathlib.Path(f"checkpoints/{args.name.lower()}", run_name)
-    if not os.path.isdir(save_path):
-        os.makedirs(save_path)
-
+def train(model, train_dataset, val_dataset, args, processor):    
     train_args = TrainingArguments(
         output_dir=f"./checkpoints/{args.name.lower()}/{run_name}",
         overwrite_output_dir = True,
@@ -208,15 +148,12 @@ def train(model, train_dataset, val_dataset, args, processor):
         greater_is_better=False,            # We want to minimize validation loss
 
         # Pytorch v2
-        torch_compile=True,
+        #torch_compile=True,
 
         # Wandb
         report_to="wandb",
         run_name=run_name,
         logging_steps=1,
-
-        # Callbacks
-        callbacks=[EarlyStoppingCallback(earyl_stopping_patience=30), WandbCallback()]
     )
 
     trainer = Trainer(
@@ -225,22 +162,12 @@ def train(model, train_dataset, val_dataset, args, processor):
         train_dataset=train_dataset,
         eval_dataset=val_dataset,
         data_collator=collate_fn,
-    )
 
-    """val_loader = DataLoader(
-        val_dataset,
-        batch_size=args.batch_size,
-        num_workers=args.workers,
-        pin_memory=True,
-        shuffle=False,
-        drop_last=False,
-        collate_fn=collate_fn
+        # Callbacks
+        callbacks=[EarlyStoppingCallback(early_stopping_patience=30)]
     )
-    progress_callback = WandbPredictionProgressCallback(processor, val_loader)
-    trainer.add_callback(progress_callback)"""
 
     trainer.train()
-    wandb.finish()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -274,7 +201,7 @@ if __name__ == '__main__':
         ignore_index=0,
         padding=False,
     )
-    model = Mask2FormerForUniversalSegmentation.from_pretrained(
+    model = AutoModelForUniversalSegmentation.from_pretrained(
         args.model,
         id2label=id2label,
         label2id=label2id,
@@ -282,5 +209,47 @@ if __name__ == '__main__':
     )
     model = model.cuda()
 
+    # Prepare data
     train_dataset, val_dataset = prepare_data(processor)
+
+    # Wandb
+    if int(os.environ.get("LOCAL_RANK", -1)) == 1:
+        log.info(
+            f"""[TRAINING]:
+                Model:           {args.name}
+                Resolution:      {args.patch_size}x{args.patch_size}
+                Epochs:          {args.epochs}
+                Batch size:      {args.batch_size}
+                Patch size:      {args.patch_size}
+                Learning rate:   {args.lr}
+                Training size:   {int(len(train_dataset))}
+                Validation size: {int(len(val_dataset))}
+            """
+        )
+
+        wandb_log = wandb.init(project=args.name.lower(), entity="firebot031")
+        wandb_log.config.update(
+            dict(
+                epochs=args.epochs,
+                batch_size=args.batch_size,
+                learning_rate=args.lr,
+                patch_size=args.patch_size,
+                weight_decay=args.weight_decay,
+            )
+        )
+
+        run_name = (
+            wandb.run.name
+            if wandb.run.name is not None
+            else f"{args.model}-{args.encoder}-{args.batch_size}-{args.patch_size}"
+        )
+
+        save_path = pathlib.Path(f"checkpoints/{args.name.lower()}", run_name)
+        if not os.path.isdir(save_path):
+            os.makedirs(save_path)
+
+    # Train
     train(model, train_dataset, val_dataset, args, processor)
+
+    if int(os.environ.get("LOCAL_RANK", -1)) == 1:
+        wandb.finish()
