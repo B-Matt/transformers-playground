@@ -123,10 +123,16 @@ celerybeat.pid
 .env
 .venv
 env/
+.venvw/
 venv/
 ENV/
 env.bak/
 venv.bak/
+.vscode/
+wandb/
+checkpoints/
+dataset/
+preped_data/
 
 # Spyder project settings
 .spyderproject
